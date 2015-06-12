@@ -79,12 +79,6 @@ set +e
 grep -i  "^${partition_column}\>" ${hive_table_ddl} >${tmp_file}
 set -e
 
-echo "================================="
-echo ${tmp_file} 
-cat ${tmp_file} 
-echo "================================="
-
-
 if [ ! -s ${tmp_file} ]
 then
     echo "分区键在表中不存在,请核查!"
@@ -280,6 +274,12 @@ echo "FROM ${ss_table}_cdc_delta delta
 FULL OUTER JOIN ${ss_table}_cdc_del del
 ON delta.${pk_name} = del.${pk_name};" >> $delta_dol
 
+
+echo "*************************************************************************************"
+echo "请查看结果："
+echo ./dol/$ss_dol
+echo ./dol/$delta_dol
+echo "*************************************************************************************"
 
 exit 0
 
