@@ -1,0 +1,287 @@
+#!/usr/bin/env bash
+
+usage="Usage: gen hive_table"
+
+# if no args specified, show usage
+if [ $# -ne 1 ]; then
+  echo $usage
+  exit 1
+fi
+
+hive_table=$1
+cfg_file=./cfg/${hive_table}.cfg
+hive_table_ddl=./ddl/${hive_table}.ddl
+tmp_file=./tmp/tmp.txt
+
+
+if [ ! -f ${cfg_file} ]
+then
+   echo "./cfg/${hive_table}.cfg 不存在!"
+   exit
+fi
+
+
+
+set +e
+grep -i "^partition_column\>" $cfg_file >${tmp_file}
+read para_partition_column partition_column < ${tmp_file}
+rcode_partition_column=$?
+set -e
+
+if [ "X"$partition_column == "X" ]
+then
+
+    echo "分区键没有设置!!!"
+    exit
+
+fi
+
+
+set +e
+grep -i "^pk_name\>" $cfg_file >${tmp_file}
+read para_pk_name pk_name< ${tmp_file}
+set -e
+
+
+if [ "X"$pk_name == "X" ]
+then
+
+    echo "主键没有设置!!!"
+    exit
+
+fi
+
+set +e
+grep -i "^pk_format\>" $cfg_file >${tmp_file}
+read para_pk_format pk_format < ${tmp_file}
+rcode_pk_format=$?
+set -e
+
+set +e
+grep -i "^ss_table\>" $cfg_file >${tmp_file}
+read para_ss_table ss_table < ${tmp_file}
+rcode_ss_table=$?
+set -e
+
+default_ss_table=${hive_table}_ss
+ss_table=${ss_table:-$default_ss_table}
+es_table=${ss_table}_delta
+
+
+ss_dol=./dol/dwdev.${ss_table}.dol
+delta_dol=./dol/dwdev.${es_table}.dol
+
+
+
+hive  -e 'desc  bi.dpdm_wide_snapshot_d_forum_user_note_info;' > ${hive_table_ddl}
+
+set +e
+grep -i  "^${partition_column}\>" ${hive_table_ddl} >${tmp_file}
+set -e
+
+echo "================================="
+echo ${tmp_file} 
+cat ${tmp_file} 
+echo "================================="
+
+
+if [ ! -s ${tmp_file} ]
+then
+    echo "分区键在表中不存在,请核查!"
+    exit
+fi
+
+
+echo "#**
+# Name:      $ss_table
+# Desc:      
+# Inputs:    \${env.YYYYMMDD} 数据计算时间
+# Creat Date: `date`
+*#
+
+use bi;
+
+##设置环境变量
+set mapred.job.name = $ss_table;
+
+#**
+DROP TABLE IF EXISTS $ss_table;
+CREATE TABLE $ss_table (" > $ss_dol
+
+
+if [ "X"$pk_format != "X" ] && [ $pk_format !=  $pk_name ]
+then
+
+    echo "$pk_name string comment '主键'," >> $ss_dol
+
+fi
+
+awk -F" " '{print $1,$2}' ${hive_table_ddl} | while read column_name column_type
+do
+
+if [ "X"$column_name == "X"$partition_column ]
+then
+   echo "${pre_column_name} ${pre_column_type}" >> $ss_dol
+   break
+else
+  if [ "X"$pre_column_name != "X" ]
+  then
+    echo "${pre_column_name} ${pre_column_type}," >> $ss_dol
+  fi
+   
+fi
+
+pre_column_name=$column_name
+pre_column_type=$column_type
+
+done
+
+echo ")
+ROW FORMAT DELIMITED
+FIELDS TERMINATED BY '\005'
+COLLECTION ITEMS TERMINATED BY '\002'
+MAP KEYS TERMINATED BY '\003'
+LINES TERMINATED BY '\n'
+STORED AS RCFILE;
+
+ALTER TABLE $ss_table SET SERDEPROPERTIES('serialization.NULL.format' = '');
+*#
+
+INSERT OVERWRITE TABLE $ss_table
+SELECT" >> $ss_dol
+
+if [ "X"$pk_format != "X" ] && [ $pk_format !=  $pk_name ]
+then
+    echo "${pk_format} AS ${pk_name}," >> $ss_dol
+
+fi
+
+
+awk -F" " '{print $1}' ${hive_table_ddl}  | while read column_name
+do
+
+if [ "X"$column_name == "X"$partition_column ]
+then
+   echo "${pre_column_name}" >> $ss_dol
+   break
+else
+  if [ "X"$pre_column_name != "X" ]
+  then
+    echo "${pre_column_name}," >> $ss_dol
+  fi
+fi
+
+pre_column_name=$column_name
+
+done
+
+
+echo "FROM $hive_table
+WHERE hp_cal_dt = '\$env.YYYYMMDD';" >> $ss_dol
+
+
+
+########################################################################################
+
+echo "#**
+# Name:      $es_table
+# Desc:      
+# Inputs:    \${env.YYYYMMDD} 数据计算时间
+# Creat Date: `date`
+*#
+
+use bi;
+
+##设置环境变量
+set mapred.job.name = $es_table;
+
+#**
+DROP TABLE IF EXISTS $es_table;
+CREATE TABLE $es_table (" > $delta_dol
+
+
+
+
+if [ "X"$pk_format != "X" ] && [ $pk_format !=  $pk_name ]
+then
+
+    echo "$pk_name string comment '主键'," >> $delta_dol
+
+fi
+
+awk -F" " '{print $1,$2}' ${hive_table_ddl} | while read column_name column_type
+do
+
+if [ "X"$column_name == "X"$partition_column ]
+then
+   echo "${pre_column_name} ${pre_column_type}" >> $delta_dol
+   break
+else
+  if [ "X"$pre_column_name != "X" ]
+  then
+    echo "${pre_column_name} ${pre_column_type}," >> $delta_dol
+  fi
+   
+fi
+
+pre_column_name=$column_name
+pre_column_type=$column_type
+
+done
+
+echo ")
+ROW FORMAT DELIMITED
+FIELDS TERMINATED BY '\005'
+COLLECTION ITEMS TERMINATED BY '\002'
+MAP KEYS TERMINATED BY '\003'
+LINES TERMINATED BY '\n'
+STORED AS RCFILE;
+
+ALTER TABLE $es_table SET SERDEPROPERTIES('serialization.NULL.format' = '');
+
+create table ${ss_table}_cdc_delta
+like ${ss_table};
+create table ${ss_table}_cdc_del
+like ${ss_table};
+
+*#
+
+INSERT OVERWRITE TABLE $es_table
+SELECT" >> $delta_dol
+
+
+if [ "X"$pk_format != "X" ] && [ $pk_format !=  $pk_name ]
+then
+    echo "COALESCE(delta.${pk_name},del.${pk_name})," >> $delta_dol
+
+fi
+
+
+awk -F" " '{print $1}' ${hive_table_ddl}  | while read column_name
+do
+
+if [ "X"$column_name == "X"$partition_column ]
+then
+   echo "IF(delta.${pk_name} IS NOT NULL,delta.${pre_column_name},NULL)" >> $delta_dol
+   break
+else
+  if [ "X"$pre_column_name != "X" ]
+  then
+    echo "IF(delta.${pk_name} IS NOT NULL,delta.${pre_column_name},NULL)," >> $delta_dol
+  fi
+fi
+
+pre_column_name=$column_name
+
+done
+
+
+echo "FROM ${ss_table}_cdc_delta delta
+FULL OUTER JOIN ${ss_table}_cdc_del del
+ON delta.${pk_name} = del.${pk_name};" >> $delta_dol
+
+
+exit 0
+
+
+
