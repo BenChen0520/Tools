@@ -1,4 +1,10 @@
-s和_ss_delta表
+请在raw模式下查看
+
+名称: 自动生成cdc代码
+描述: 增量的从hive传输数据到es
+
+输入: 表名
+输出：两个代码分别生成_ss和_ss_delta表
 
 
 需要的配置（cfg目录下）
@@ -51,7 +57,6 @@ s和_ss_delta表
 5 查看结果
   cd dol/
   ls -l *dpdm_wide_snapshot_d_forum_user_note_info_ss*
-
 
 
 
