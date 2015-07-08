@@ -73,7 +73,7 @@ delta_dol=./dol/dwdev.${es_table}.dol
 
 
 
-hive  -e 'desc  bi.dpdm_wide_snapshot_d_forum_user_note_info;' > ${hive_table_ddl}
+hive  -e 'desc  bi."${hive_table}";' > ${hive_table_ddl}
 
 set +e
 grep -i  "^${partition_column}\>" ${hive_table_ddl} >${tmp_file}
